@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, HTTPException
 import json
-from parse import parse_logs
+from parse import parse_terraform_logs
 
 app = FastAPI(title="Terraform Logs Parser API")
 
@@ -12,8 +12,10 @@ async def parse_json(file: UploadFile):
     content = await file.read()
     try:
         logs = json.loads(content.decode("utf-8"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Некорректный JSON")
+        if not isinstance(logs, list):
+            raise ValueError("JSON должен быть списком объектов")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Некорректный JSON: {str(e)}")
 
-    parsed_data = parse_logs(logs)
+    parsed_data = parse_terraform_logs(logs)
     return {"parsed": parsed_data}
