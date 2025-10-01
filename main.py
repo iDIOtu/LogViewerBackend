@@ -25,3 +25,16 @@ async def parse_json(file: UploadFile):
 
     segments = ParseWithLogs.parse_file(logs)
     return {"segments": segments}
+
+@app.post("/api/parsechainsjson")
+async def parse_json(file: UploadFile):
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="Файл должен быть в формате .json")
+
+    content = await file.read()
+    text = content.decode("utf-8-sig")
+    logs = [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+    chains = ParseWithLogs.parse_file_to_chain(logs)
+    return {"chains": chains}
