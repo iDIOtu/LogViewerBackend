@@ -1,4 +1,6 @@
 import json
+from collections import defaultdict
+
 from parse import Parse
 from plugin_client import send_segment_to_plugin
 
@@ -156,46 +158,32 @@ class ParseWithLogs:
         return segments
 
     @classmethod
-    def process_segments_with_plugins(cls, segments):
+    def parse_file_to_chain(cls, logs: list) -> list:
         """
-        Отправляет каждый сегмент на все плагины и добавляет результаты в сегмент.
+        Обрабатывает список JSON объектов (dict) и группирует по tf_req_id
         """
-        for segment in segments:
-            segment["PluginResponses"] = []
-            for plugin in cls.PLUGINS:
-                host = plugin["host"]
-                port = plugin["port"]
+        groups = defaultdict(list)
 
-                try:
-                    response = send_segment_to_plugin(segment, host, port)
-                    # Сохраняем данные плагина в сегмент
-                    segment["PluginResponses"].append({
-                        "plugin": f"{host}:{port}",
-                        "success": response.success,
-                        "message": response.message,
-                        "metadata": dict(response.metadata),
-                        "logs_count": len(response.logs)
-                    })
+        for line_num, log_obj in enumerate(logs, 1):
+            try:
+                req_id = log_obj.get('tf_req_id')
 
-                    # Если плагин вернул новые логи, можно их заменить/добавить
-                    if response.logs:
-                        segment["Logs"] = [
-                            {
-                                "level": log.level,
-                                "message": log.message,
-                                "timestamp": log.timestamp,
-                                "module": log.module
-                            } for log in response.logs
-                        ]
+                if req_id:
+                    log_entry = {
+                        "Id": line_num,
+                        "line": json.dumps(log_obj)
+                    }
+                    groups[req_id].append(log_entry)
 
-                except Exception as e:
-                    # Если плагин не отвечает, просто логируем
-                    segment["PluginResponses"].append({
-                        "plugin": f"{host}:{port}",
-                        "success": False,
-                        "message": str(e),
-                        "metadata": {},
-                        "logs_count": 0
-                    })
+            except (AttributeError, TypeError) as e:
+                print(f"Warning: Invalid log object {line_num}: {log_obj}")
+                continue
 
-        return segments
+        result = []
+        for req_id, log_entries in groups.items():
+            result.append({
+                "tf_req_id": req_id,
+                "Logs": log_entries
+            })
+
+        return result
