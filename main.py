@@ -1,8 +1,17 @@
 from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import json
 from Parse_with_segments import ParseWithLogs
 
 app = FastAPI(title="Terraform Logs Parser API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Разрешает все источники (не для продакшена!)
+    allow_credentials=True,
+    allow_methods=["*"],  # Разрешает все HTTP методы (GET, POST, PUT, DELETE и т.д.)
+    allow_headers=["*"],  # Разрешает все заголовки
+)
 
 @app.post("/api/parsejson")
 async def parse_json(file: UploadFile):
@@ -10,14 +19,9 @@ async def parse_json(file: UploadFile):
         raise HTTPException(status_code=400, detail="Файл должен быть в формате .json")
 
     content = await file.read()
-    try:
-        logs = json.loads(content.decode("utf-8"))
-        if not isinstance(logs, list):
-            raise ValueError("JSON должен быть списком объектов")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Некорректный JSON: {str(e)}")
+    text = content.decode("utf-8-sig")
+    logs = [json.loads(line) for line in text.splitlines() if line.strip()]
 
-    # --- вызываем новый метод ParseWithLogs ---
-    segments = ParseWithLogs.parse_json(logs)
 
+    segments = ParseWithLogs.parse_file(logs)
     return {"segments": segments}
