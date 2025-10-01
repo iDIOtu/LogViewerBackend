@@ -1,4 +1,6 @@
 import json
+from collections import defaultdict
+
 from parse import Parse
 
 
@@ -101,3 +103,34 @@ class ParseWithLogs:
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
         return segments
+
+    @classmethod
+    def parse_file_to_chain(cls, logs: list) -> list:
+        """
+        Обрабатывает список JSON объектов (dict) и группирует по tf_req_id
+        """
+        groups = defaultdict(list)
+
+        for line_num, log_obj in enumerate(logs, 1):
+            try:
+                req_id = log_obj.get('tf_req_id')
+
+                if req_id:
+                    log_entry = {
+                        "Id": line_num,
+                        "line": json.dumps(log_obj)
+                    }
+                    groups[req_id].append(log_entry)
+
+            except (AttributeError, TypeError) as e:
+                print(f"Warning: Invalid log object {line_num}: {log_obj}")
+                continue
+
+        result = []
+        for req_id, log_entries in groups.items():
+            result.append({
+                "tf_req_id": req_id,
+                "Logs": log_entries
+            })
+
+        return result
