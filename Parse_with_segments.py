@@ -1,10 +1,16 @@
 import json
 from parse import Parse
+from plugin_client import send_segment_to_plugin
 
 
 class ParseWithLogs:
     SEGMENT_START_KEYWORD = "Terraform version:"
     SEGMENT_END_EXACT = "statemgr.Filesystem: unlocking terraform.tfstate using fcntl flock"
+
+    PLUGINS = [
+        {"host": "localhost", "port": 50051},  # первый плагин
+        {"host": "localhost", "port": 50052},  # второй плагин
+    ]
 
     @classmethod
     def split_into_segments(cls, logs: list) -> list:
@@ -147,4 +153,49 @@ class ParseWithLogs:
 
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
+        return segments
+
+    @classmethod
+    def process_segments_with_plugins(cls, segments):
+        """
+        Отправляет каждый сегмент на все плагины и добавляет результаты в сегмент.
+        """
+        for segment in segments:
+            segment["PluginResponses"] = []
+            for plugin in cls.PLUGINS:
+                host = plugin["host"]
+                port = plugin["port"]
+
+                try:
+                    response = send_segment_to_plugin(segment, host, port)
+                    # Сохраняем данные плагина в сегмент
+                    segment["PluginResponses"].append({
+                        "plugin": f"{host}:{port}",
+                        "success": response.success,
+                        "message": response.message,
+                        "metadata": dict(response.metadata),
+                        "logs_count": len(response.logs)
+                    })
+
+                    # Если плагин вернул новые логи, можно их заменить/добавить
+                    if response.logs:
+                        segment["Logs"] = [
+                            {
+                                "level": log.level,
+                                "message": log.message,
+                                "timestamp": log.timestamp,
+                                "module": log.module
+                            } for log in response.logs
+                        ]
+
+                except Exception as e:
+                    # Если плагин не отвечает, просто логируем
+                    segment["PluginResponses"].append({
+                        "plugin": f"{host}:{port}",
+                        "success": False,
+                        "message": str(e),
+                        "metadata": {},
+                        "logs_count": 0
+                    })
+
         return segments

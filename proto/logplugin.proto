@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package proto;
+
+
+// gRPC-сервис для плагинов
+service PluginService {
+  // Плагин получает сегмент и возвращает обработанный результат
+  rpc ProcessSegment(SegmentRequest) returns (SegmentResponse);
+}
+
+// Описание одного лог-элемента
+message LogEntry {
+  string level = 1;        // INFO, DEBUG, ERROR и т.д.
+  string message = 2;
+  string timestamp = 3;
+  string module = 4;       // если есть
+}
+
+// Запрос к плагину — один сегмент
+message SegmentRequest {
+  int32 segment_id = 1;                  // ID сегмента
+  string segment_type = 2;               // apply / plan
+  string start_time = 3;
+  string end_time = 4;
+  repeated LogEntry logs = 5;            // все логи сегмента
+}
+
+// Ответ плагина — может содержать обработанные логи или метаданные
+message SegmentResponse {
+  bool success = 1;                      // флаг успешной обработки
+  string message = 2;                    // текстовое сообщение
+  repeated LogEntry logs = 3;            // опционально: изменённые логи
+  map<string, string> metadata = 4;      // любая дополнительная информация
+}
