@@ -6,10 +6,17 @@ from datetime import datetime, timedelta
 class Parse:
     # --- Регулярки для timestamp и уровня логирования ---
     TS_PATTERNS = [
+        # строгий ISO (приоритет)
         re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:\d{2})?"),
-        re.compile(r"\d{2}:\d{2}:\d{2}(?:[.,]\d+)?"),
-        re.compile(r"\d{10}(?:\.\d+)?"),
+        # время HH:MM:SS только в безопасных позициях (например начало строки или после даты)
+        re.compile(r"(?:^\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)|(?:(?<=\d{4}-\d{2}-\d{2}[ T])\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)"),
+        # epoch (только как отдельный токен)
+        re.compile(r"\b\d{10}(?:\.\d+)?\b"),
     ]
+
+    # допустимый диапазон epoch (примерно 2001-01-01 .. 2100-01-01)
+    EPOCH_MIN = 1000000000  # ~2001-09-09
+    EPOCH_MAX = 4102444800  # 2100-01-01
 
     LEVEL_PATTERN = re.compile(r"\b(INFO|DEBUG|TRACE|ERROR|WARN|FATAL)\b", re.IGNORECASE)
 
@@ -66,15 +73,40 @@ class Parse:
         return {k.lstrip("@"): v for k, v in entry.items()}
 
     @classmethod
-    def extract_timestamp_level(cls, msg, ts_existing = None, lvl_existing=None):
+    def extract_timestamp_level(cls, msg, ts_existing=None, lvl_existing=None):
         ts, lvl = ts_existing, lvl_existing
 
         # --- timestamp через regex ---
-        if not ts:
+        if not ts :
             for pat in cls.TS_PATTERNS:
                 m = pat.search(msg)
-                if m:
-                    ts = m.group(0)
+                if not m:
+                    continue
+                candidate = m.group(0)
+
+                # если это epoch-паттерн (последний паттерн в списке), то валидируем
+                if pat.pattern == cls.TS_PATTERNS[2].pattern:
+                    # candidate содержит только цифры (10 digits) возможно с .fraction
+                    try:
+                        epoch_val = float(candidate)
+                        if EPOCH_MIN <= epoch_val <= EPOCH_MAX:
+                            # преобразуем epoch в ISO (без tz, например)
+                            try:
+                                dt = datetime.fromtimestamp(epoch_val)
+                                ts = dt.isoformat()
+                                break
+                            except Exception:
+                                # если не смогли парсить epoch в datetime — игнорируем этот матч
+                                continue
+                        else:
+                            # число вне разумного диапазона — это подозрительный матч (например часть версии)
+                            # игнорируем и продолжаем поиск по другим паттернам
+                            continue
+                    except Exception:
+                        continue
+                else:
+                    # для остальных паттернов просто используем найденную строку
+                    ts = candidate
                     break
 
         # --- уровень ---
@@ -99,7 +131,7 @@ class Parse:
             timestamps = [logs[i].get("timestamp") for i in range(seg_start, seg_end + 1)]
             for offset, ts in enumerate(timestamps):
                 i = seg_start + offset
-                if ts is None:
+                if not ts:  # это сработает и для None, и для ""
                     # ищем предыдущий timestamp только внутри сегмента
                     prev = next((timestamps[j] for j in range(offset - 1, -1, -1) if timestamps[j]), None)
                     nxt = next((timestamps[j] for j in range(offset + 1, len(timestamps)) if timestamps[j]), None)

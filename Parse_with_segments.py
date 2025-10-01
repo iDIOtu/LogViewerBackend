@@ -9,26 +9,28 @@ class ParseWithLogs:
     @classmethod
     def split_into_segments(cls, logs: list) -> list:
         """
-        Делит список логов на сегменты.
+        Делит список логов на сегменты. Подсегмент может быть только внутри apply.
         """
         segments = []
         current_segment = None
+        current_subsegment = None  # <-- объявляем подсегмент
         inside_segment = False
         segment_id = 1
+        #subsegment_id = 1  # уникальный ID для подсегмента
 
         for i, log in enumerate(logs):
             msg = log.get("message", "")
 
-
             # --- Начало сегмента ---
             if msg.startswith(cls.SEGMENT_START_KEYWORD) and not inside_segment:
                 current_segment = {
-                    "Type":"unknown",
+                    "Type": "unknown",
                     "Id": segment_id,
                     "StartTime": log.get("timestamp"),
                     "EndTime": None,
                     "ErrorOccurred": False,
-                    "Logs": []
+                    "Logs": [],
+                    "SubSegment": None  # <-- добавляем поле
                 }
                 inside_segment = True
 
@@ -39,18 +41,46 @@ class ParseWithLogs:
 
                 # определяем тип сегмента (только один раз)
                 if current_segment["Type"] == "unknown":
-                    msg = log.get("message", "").lower()
-                    if "backend/local: starting apply operation" in msg:
+                    msg_lower = msg.lower()
+                    if "backend/local: starting apply operation" in msg_lower:
                         current_segment["Type"] = "apply"
-                    elif "backend/local: starting plan operation" in msg:
+                    elif "backend/local: starting plan operation" in msg_lower:
                         current_segment["Type"] = "plan"
 
-            if Parse.is_error_end(log):
-                current_segment["ErrorOccurred"] = True;
+                # --- подсегменты для apply ---
+                if current_segment["Type"] == "apply":
+                    # начало подсегмента
+                    if "apply calling plan" in msg.lower() and current_subsegment is None:
+                        current_subsegment = {
+                            "Type": "plan",
+                            "Id": 1,
+                            "StartTime": log.get("timestamp"),
+                            "EndTime": None,
+                            "Logs": []
+                        }
+                        #subsegment_id += 1
 
-                # --- Конец сегмента ---
+                    # если подсегмент активен, добавляем лог
+                    if current_subsegment is not None:
+                        current_subsegment["Logs"].append(log)
+                        # проверка конца подсегмента
+                        msg_lower = msg.lower()
+                        is_error = ("level" in log and isinstance(log["level"], str) and log[
+                            "level"].lower() == "error" and
+                                    (("vertex" in msg_lower and "error" in msg_lower) or
+                                     "resource creation failed" in msg_lower))
+                        if "plan is complete" in msg_lower or is_error:
+                            current_subsegment["EndTime"] = log.get("timestamp")
+                            current_segment["SubSegment"] = current_subsegment  # <-- присваиваем в поле сегмента
+                            current_subsegment = None
+
+            # --- Ошибки, завершающие сегмент ---
+            if Parse.is_error_end(log) and current_segment is not None:
+                current_segment["ErrorOccurred"] = True
+
+            # --- Конец сегмента ---
             if inside_segment and msg == cls.SEGMENT_END_EXACT:
-
+                # добавляем все последующие логи до начала нового сегмента
                 j = i + 1
                 while j < len(logs) and not logs[j].get("message", "").startswith(cls.SEGMENT_START_KEYWORD):
                     current_segment["Logs"].append(logs[j])
@@ -60,9 +90,8 @@ class ParseWithLogs:
                 segments.append(current_segment)
                 segment_id += 1
                 current_segment = None
+                current_subsegment = None
                 inside_segment = False
-
-
 
         return segments
 
@@ -94,9 +123,27 @@ class ParseWithLogs:
 
             enriched_logs.append(entry)
 
-
         # --- заполняем пропущенные timestamp ---
-        enriched_logs = Parse.fill_missing_timestamps(enriched_logs)
+        # сначала вычислим сегментные диапазоны по сообщению (мы используем правила ParseWithLogs)
+        segment_ranges = []
+        inside = False
+        start_idx = None
+        for idx, entry in enumerate(enriched_logs):
+            msg = entry.get("message", "")
+            if msg.startswith(ParseWithLogs.SEGMENT_START_KEYWORD) and not inside:
+                start_idx = idx
+                inside = True
+            if inside and msg == ParseWithLogs.SEGMENT_END_EXACT:
+                end_idx = idx
+                segment_ranges.append((start_idx, end_idx))
+                inside = False
+                start_idx = None
+        # если сегмент начался, но не был закрыт — закроем его до конца массива
+        if inside and start_idx is not None:
+            segment_ranges.append((start_idx, len(enriched_logs) - 1))
+
+        # теперь заполняем пропуски только внутри найденных сегментов
+        enriched_logs = Parse.fill_missing_timestamps(enriched_logs, segment_ranges)
 
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
