@@ -15,6 +15,50 @@ class ParseWithLogs:
     ]
 
     @classmethod
+    def process_segments_with_plugins(cls, segments):
+        """
+        Отправляет каждый сегмент на все плагины и добавляет результаты в сегмент.
+        """
+        for segment in segments:
+            segment["PluginResponses"] = []
+            for plugin in cls.PLUGINS:
+                host = plugin["host"]
+                port = plugin["port"]
+
+                try:
+                    response = send_segment_to_plugin(segment, host, port)
+                    # Сохраняем данные плагина в сегмент
+                    segment["PluginResponses"].append({
+                        "plugin": f"{host}:{port}",
+                        "success": response.success,
+                        "message": response.message,
+                        "metadata": dict(response.metadata),
+                        "logs_count": len(response.logs)
+                    })
+
+                    # Если плагин вернул новые логи, можно их заменить/добавить
+                    if response.logs:
+                        segment["Logs"] = [
+                            {
+                                "level": log.level,
+                                "message": log.message,
+                                "timestamp": log.timestamp,
+                                "module": log.module
+                            } for log in response.logs
+                        ]
+
+                except Exception as e:
+                    # Если плагин не отвечает, просто логируем
+                    segment["PluginResponses"].append({
+                        "plugin": f"{host}:{port}",
+                        "success": False,
+                        "message": str(e),
+                        "metadata": {},
+                        "logs_count": 0
+                    })
+
+        return segments
+    @classmethod
     def split_into_segments(cls, logs: list) -> list:
         """
         Делит список логов на сегменты. Подсегмент может быть только внутри apply.
