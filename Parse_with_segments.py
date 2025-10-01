@@ -67,14 +67,12 @@ class ParseWithLogs:
         return segments
 
     @classmethod
-    def parse_file(cls, input_file: str, output_file: str):
+    def parse_file(cls, logs: list) -> list:
         """
         Принимает путь к JSON-файлу с логами,
         обогащает логи (timestamp, level) и создаёт JSON-файл с сегментами.
         """
-        # --- читаем логи ---
-        with open(input_file, "r", encoding="utf-8") as f:
-            logs = [json.loads(line) for line in f]
+        # --- читаем логи --
 
         enriched_logs = []
         for entry in logs:
@@ -102,13 +100,4 @@ class ParseWithLogs:
 
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
-
-        # --- пишем результат ---
-        with open(output_file, "w", encoding="utf-8") as f_out:
-            json.dump(segments, f_out, ensure_ascii=False, indent=2)
-
-        print(f"Готово! Найдено {len(segments)} сегментов. Результат сохранён в {output_file}")
-input_file = "4. tflog.json"
-output_file = "segments.json"
-
-ParseWithLogs.parse_file(input_file, output_file)
+        return segments

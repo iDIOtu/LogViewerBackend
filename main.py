@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, HTTPException
 import json
-from parse import Parse
+from Parse_with_segments import ParseWithLogs
 
 app = FastAPI(title="Terraform Logs Parser API")
 
@@ -17,7 +17,7 @@ async def parse_json(file: UploadFile):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Некорректный JSON: {str(e)}")
 
+    # --- вызываем новый метод ParseWithLogs ---
+    segments = ParseWithLogs.parse_json(logs)
 
-    parsed_data = Parse.parse_logs_from_list(logs)
-
-    return {"parsed": parsed_data}
+    return {"segments": segments}
